@@ -1,10 +1,12 @@
+> Speech Denoising
+## Abstract
 Mean Teacher는 Semi-Supervised Learnimg으로 Labeling과 UnLabeling 되어 있는 Image들을 
 classification 하는데 사용
 
 Mean Teachers에서는 Hard Training, 같은 Input에 일부러 서로 다른 Noise 입히고 일관된 Prediction이 나오도록 하는 Consistency Loss 사용
 
 ASR Denoising은 Noisy가 들어간 Speech Data에서 Noisy가 들어가지 않은 Speech Data와 일관된 결과가 나오도록
-학습한다는 점이 Mean Teacher 개념과 비슷하다고 생각하여 적용
+학습한다는 점이 Mean Teacher와 비슷하다고 생각하여 적용
 
 ## Implement
 
@@ -39,5 +41,9 @@ Github: https://github.com/park-cheol/ASR-Transformer
 clovacall: https://github.com/clovaai/ClovaCall
 
 Noisy_Data: ClovaCall Dataset에다가 흔히 발생되는 Noise wav 파일들을 SNR 비율(0)로 입힘 
+
+`cd NoiseInjection`
+
+`python injection.py --ARGUMENT..`
 
 
