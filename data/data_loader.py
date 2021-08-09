@@ -48,7 +48,7 @@ def _collate_fn(batch, pad_token=0):
         noisy_seq_length = noisy_tensor.size(1)
         # print(tensor.size(1))
         seqs[x][0].narrow(1, 0, seq_length).copy_(tensor)
-        seqs[x][0].narrow(1, 0, noisy_seq_length).copy_(noisy_tensor)
+        noisy_seqs[x][0].narrow(1, 0, noisy_seq_length).copy_(noisy_tensor)
         # print("seq: ", x,seqs[x][0].size()) # [161, length]
         targets[x].narrow(0, 0, len(target)).copy_(torch.LongTensor(target))
         # print("target: ", targets[x].size())

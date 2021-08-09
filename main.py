@@ -32,6 +32,8 @@ from model.transformer.model import SpeechTransformer
 from model.las.model import *
 from utils import *
 
+warnings.filterwarnings(action='ignore')
+
 parser = argparse.ArgumentParser()
 # Datasets
 parser.add_argument('--train-file', type=str,
@@ -219,7 +221,10 @@ def main_worker(gpu, ngpus_per_node, args):
                          n_layers=args.decoder_layers, rnn_cell=args.rnn_type,
                          dropout_p=args.dropout, bidirectional_encoder=args.bidirectional).cuda(args.gpu)
 
-        ema_model = Seq2Seq(enc, dec)
+        ema_model = Seq2Seq(ema_enc, ema_dec)
+
+        for param in ema_model.parameters():
+            param.detach_()
 
     if args.num_gpu != 1:
         print("DataParallel 사용")
@@ -328,7 +333,6 @@ def train(model, ema_model, data_loader, criterion, optimizer, args, epoch, trai
         # print("targets: ", scripts.size())
         # print("seq_lengths: ", feat_lengths.size())
         # print("scripts_lengths: ", len(script_lengths))
-
 
         optimizer.zero_grad()
 

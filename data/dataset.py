@@ -102,12 +102,15 @@ class MelFilterBankDataset(Dataset):
         # plt.show()
 
         spect, phase = librosa.magphase(D)
-        feature = np.log1p(spect)
+        spect = np.log1p(spect)
 
 
         # normalize
-        feature -= feature.mean()
-        feature /= np.std(feature)
+        if self.normalize:
+            mean = np.mean(spect)
+            std = np.std(spect)
+            spect -= mean
+            spect /= std
 
         spect = torch.FloatTensor(spect)
 
