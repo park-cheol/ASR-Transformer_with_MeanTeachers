@@ -2,4 +2,12 @@ dataset
 saved_models
 .idea/
 __pycache__/
-NoiseInjection
+NoiseInjection/wavs_test
+NoiseInjection/wavs_train
+NoiseInjection/noisy_wavs_test
+NoiseInjection/noisy_wavs_train
+NoiseInjection/noise
+NoiseInjection/noise_test
+NoiseInjection/noise_train
+NoiseInjection/gun_shot
+NoiseInjection/engine_idling
