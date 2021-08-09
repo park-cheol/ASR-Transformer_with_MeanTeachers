@@ -4,11 +4,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.attention import MultiHeadAttention
-from model.VGGExtractor import VGGExtractor
-from model.position import *
-from model.mask import *
-from model.sublayers import *
+from model.transformer.attention import MultiHeadAttention
+from model.transformer.VGGExtractor import VGGExtractor
+from model.transformer.position import *
+from model.transformer.mask import *
+from model.transformer.sublayers import *
 from utils import init_weight
 
 ################################

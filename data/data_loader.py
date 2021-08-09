@@ -20,42 +20,43 @@ def _collate_fn(batch, pad_token=0):
     # print("target_lengths: ", target_lengths)
     noisy_seq_lengths = [len(s[2]) for s in batch]
 
-    max_seq_sample = max(batch, key=seq_length_)[0] # 값
-    max_noisy_seq_sample = max(batch, key=noisy_lenght_)[0]
+    max_seq_size = max(seq_lengths)
+    # print("max_seq_size: ", max_seq_size)
+    max_target_size = max(target_lengths)
+    # print("max_target_size: ", max_target_size)
+    max_noisy_seq_size = max(noisy_seq_lengths)
 
-    max_target_sample = max(batch, key=target_length_)[1] # idx
-
-    max_seq_size = max_seq_sample.size(0)
-    noisy_max_seq_size = max_noisy_seq_sample.size(0)
-    max_target_size = len(max_target_sample)
-
-    feat_size = max_seq_sample.size(1)
-    noisy_feat_size = max_noisy_seq_sample.size(1)
-
+    feat_size = batch[0][0].size(0)
+    noisy_size = batch[0][0].size(0)
+    # print("feat_size: ", feat_size) # 161 : 1+ n_fft/2
     batch_size = len(batch)
+    # print("batch_size: ", batch_size) # 16
 
-    seqs = torch.zeros(batch_size, max_seq_size, feat_size)
-    noisy_seqs = torch.zeros(batch_size, noisy_max_seq_size, noisy_feat_size)
+    seqs = torch.zeros(batch_size, 1, feat_size, max_seq_size)
+    noisy_seqs = torch.zeros(batch_size, 1, noisy_size, feat_size)
     targets = torch.zeros(batch_size, max_target_size).to(torch.long)
-    targets.fill_(pad_token)
 
     for x in range(batch_size):
         sample = batch[x]
+        # print("sample: ", sample)
         tensor = sample[0]
+        # print("tensor: ", x, tensor.size()) # [161, Frame]
         target = sample[1]
         noisy_tensor = sample[2]
-
-        seq_length = tensor.size(0)
-        noisy_seq_length = noisy_tensor.size(0)
-
-        seqs[x].narrow(0, 0, seq_length).copy_(tensor)
-        noisy_seqs[x].narrow(0, 0, noisy_seq_length).copy_(noisy_tensor)
+        # print("target: ", target) : transcript (index 번호들)
+        seq_length = tensor.size(1)
+        noisy_seq_length = noisy_tensor.size(1)
+        # print(tensor.size(1))
+        seqs[x][0].narrow(1, 0, seq_length).copy_(tensor)
+        seqs[x][0].narrow(1, 0, noisy_seq_length).copy_(noisy_tensor)
+        # print("seq: ", x,seqs[x][0].size()) # [161, length]
         targets[x].narrow(0, 0, len(target)).copy_(torch.LongTensor(target))
+        # print("target: ", targets[x].size())
 
-    seq_lengths = torch.IntTensor(seq_lengths)
-    noisy_seq_lengths = torch.IntTensor(noisy_seq_lengths)
+    seq_lengths = torch.IntTensor(seq_lengths)  # [16]
+    noisy_seq_lengths = torch.IntTensor(noisy_seq_lengths)  # [16]
     target_lengths = torch.IntTensor(target_lengths)
-    # print("targets1: ", targets.size())
+
 
     return seqs, targets, seq_lengths, target_lengths, noisy_seqs, noisy_seq_lengths
 

@@ -109,13 +109,13 @@ class MelFilterBankDataset(Dataset):
         feature -= feature.mean()
         feature /= np.std(feature)
 
-        feature = torch.FloatTensor(feature).transpose(0, 1)
+        spect = torch.FloatTensor(spect)
 
         # todo basic 우선 먼저 확인
         # if self.mode == 'train':
         #    feature = spec_augment(feature)
 
-        return feature
+        return spect
 
 
     def parse_transcript(self, transcript):

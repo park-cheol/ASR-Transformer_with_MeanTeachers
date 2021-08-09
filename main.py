@@ -28,7 +28,8 @@ from data.data_loader import AudioDataLoader
 from data.sampler import BucketingSampler
 from data.dataset import MelFilterBankDataset
 
-from model.model import SpeechTransformer
+from model.transformer.model import SpeechTransformer
+from model.las.model import *
 from utils import *
 
 parser = argparse.ArgumentParser()
@@ -38,16 +39,16 @@ parser.add_argument('--train-file', type=str,
 parser.add_argument('--test-file-list',
                     help='data list about test dataset', default=['dataset/test.json'])
 parser.add_argument('--labels-path', default='dataset/kor_syllable.json', help='Contains large characters over korean')
-parser.add_argument('--dataset-path', default='dataset', help='Target dataset path')
+parser.add_argument('--dataset-path', default='dataset/clovacall', help='Target dataset path')
 # Hyperparameters
-parser.add_argument('--n-encoder-layers', type=int, default=6, help='number of layers of model (default: 3)')
-parser.add_argument('--d-model', type=int, default=512, help='hidden size of model (default: 512)')
-parser.add_argument('--n-decoder-layers', type=int, default=6, help='number of pyramidal layers (default: 2)')
-parser.add_argument('--n-heads', type=int, default=8)
+parser.add_argument('--rnn-type', default='lstm', help='Type of the RNN. rnn|gru|lstm are supported')
+parser.add_argument('--encoder-layers', type=int, default=3, help='number of layers of model (default: 3)')
+parser.add_argument('--encoder-size', type=int, default=512, help='hidden size of model (default: 512)')
+parser.add_argument('--decoder-layers', type=int, default=2, help='number of pyramidal layers (default: 2)')
+parser.add_argument('--decoder-size', type=int, default=512, help='hidden size of model (default: 512)')
 parser.add_argument('--dropout', type=float, default=0.3, help='Dropout rate in training (default: 0.3)')
-parser.add_argument('--d-ff', type=int, default=2048)
-parser.add_argument('--input-dim', type=int, default=80)
-parser.add_argument('--output-dim', type=int, default=80)
+parser.add_argument('--bidirectional', action='store_false', default=True,
+                    help='Turn off bi-directional RNNs, introduces lookahead convolution')
 
 parser.add_argument('--batch-size', type=int, default=32, help='Batch size in training (default: 32)')
 parser.add_argument('--num-workers', type=int, default=4, help='Number of workers in dataset loader (default: 4)')
@@ -196,17 +197,29 @@ def main_worker(gpu, ngpus_per_node, args):
         # test file 들을 dictionary 형태로 저장 각 파일명해가지고
 
         # Model
-        model = SpeechTransformer(args=args, num_classes=num_classes, d_model=args.d_model, input_dim=args.input_dim,
-                                  pad_id=PAD_token, sos_id=SOS_token, eos_id=EOS_token, d_ff=args.d_ff,
-                                  n_heads=args.n_heads, n_encoder_layers=args.n_encoder_layers,
-                                  n_decoder_layers=args.n_decoder_layers, dropout_p=args.dropout,
-                                  max_len=args.max_len, teacher_forcing_p=args.teacher_forcing)
+        input_size = int(math.floor((args.sample_rate * args.window_size) / 2) + 1)
+        # print(input_size) # 161 : n_fft = sample_rate * window_size /2 + 1 따라 맞춘것 같다.
+        enc = EncoderRNN(args, input_size, args.encoder_size, n_layers=args.encoder_layers,
+                         dropout_p=args.dropout, bidirectional=args.bidirectional,
+                         rnn_cell=args.rnn_type, variable_lengths=False).cuda(args.gpu)
 
-        ema_model = SpeechTransformer(args=args, num_classes=num_classes, d_model=args.d_model, input_dim=args.input_dim,
-                                      pad_id=PAD_token, sos_id=SOS_token, eos_id=EOS_token, d_ff=args.d_ff,
-                                      n_heads=args.n_heads, n_encoder_layers=args.n_encoder_layers,
-                                      n_decoder_layers=args.n_decoder_layers, dropout_p=args.dropout,
-                                      max_len=args.max_len, teacher_forcing_p=args.teacher_forcing)
+        dec = DecoderRNN(args, len(char2index), args.max_len, args.decoder_size, args.encoder_size,
+                         SOS_token, EOS_token,
+                         n_layers=args.decoder_layers, rnn_cell=args.rnn_type,
+                         dropout_p=args.dropout, bidirectional_encoder=args.bidirectional).cuda(args.gpu)
+
+        model = Seq2Seq(enc, dec)
+
+        ema_enc = EncoderRNN(args, input_size, args.encoder_size, n_layers=args.encoder_layers,
+                         dropout_p=args.dropout, bidirectional=args.bidirectional,
+                         rnn_cell=args.rnn_type, variable_lengths=False).cuda(args.gpu)
+
+        ema_dec = DecoderRNN(args, len(char2index), args.max_len, args.decoder_size, args.encoder_size,
+                         SOS_token, EOS_token,
+                         n_layers=args.decoder_layers, rnn_cell=args.rnn_type,
+                         dropout_p=args.dropout, bidirectional_encoder=args.bidirectional).cuda(args.gpu)
+
+        ema_model = Seq2Seq(enc, dec)
 
     if args.num_gpu != 1:
         print("DataParallel 사용")
@@ -219,12 +232,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # print("[Model]")
 
     # Optimizer / Criterion
-    optimizer = ScheduleAdam(
-        torch.optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-9),
-        hidden_dim=args.d_model,
-        warm_steps=args.warm_steps
-    )
-
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = nn.CrossEntropyLoss(reduction='mean').cuda(args.gpu)
 
 
@@ -256,11 +264,12 @@ def main_worker(gpu, ngpus_per_node, args):
 
         for epoch in range(args.start_epoch, args.epochs):
             train_loss, train_cer = train(model, ema_model, train_loader, criterion, optimizer, args, epoch, train_sampler,
-                                          args.max_norm)
+                                          args.max_norm, args.teacher_forcing)
             # args.max_norm = 400
 
             cer_list = []
             ema_cer_list = []
+
             for test_file in args.test_file_list:
                 print(test_file)
                 test_loader = testLoader_dict[test_file] # test.json
@@ -286,9 +295,11 @@ def main_worker(gpu, ngpus_per_node, args):
             print("Shuffling batches...")
             train_sampler.shuffle(epoch)
 
-def train(model, ema_model, data_loader, criterion, optimizer, args, epoch, train_sampler, max_norm=400):
-    global global_step
 
+def train(model, ema_model, data_loader, criterion, optimizer, args, epoch, train_sampler, max_norm=400,
+              teacher_forcing_ratio=1.0):
+
+    global global_step
     total_loss = 0.
     total_num = 0
     total_dist = 0
@@ -325,13 +336,15 @@ def train(model, ema_model, data_loader, criterion, optimizer, args, epoch, trai
         scripts = scripts.cuda(args.gpu, non_blocking=True)
         feat_lengths = feat_lengths.cuda(args.gpu, non_blocking=True)
 
+        src_len = scripts.size(1)
         target = scripts[:, 1:]
         # print("target: ", target.size())
 
-        logit = model(feats, feat_lengths, scripts, script_lengths)
+        logit = model(feats, feat_lengths, scripts, teacher_forcing_ratio=teacher_forcing_ratio)
 
         # print("logit: ", logit.size())
         # print("logit2: ", logit.contiguous().view(-1, logit.size(-1)).size())
+        logit = torch.stack(logit, dim=1).cuda(args.gpu)
         y_hat = logit.max(-1)[1]
 
         class_loss = criterion(logit.contiguous().view(-1, logit.size(-1)), target.contiguous().view(-1))
@@ -342,12 +355,12 @@ def train(model, ema_model, data_loader, criterion, optimizer, args, epoch, trai
             noisy = noisy.cuda(args.gpu, non_blocking=True)
             noisy_lengths = noisy_lengths.cuda(args.gpu, non_blocking=True)
 
-            ema_logit = ema_model(noisy, noisy_lengths, scripts, script_lengths)
+            ema_logit = ema_model(noisy, noisy_lengths, scripts, teacher_forcing_ratio=teacher_forcing_ratio)
 
-        ema_logit = torch.autograd.Variable(ema_logit.detach().data, requires_grad=False)
+        ema_logit = torch.stack(ema_logit, dim=1).cuda(args.gpu)
         ema_y_hat = ema_logit.max(-1)[1]
-        print("A", y_hat)
-        print("B", ema_y_hat)
+        # print("A", y_hat)
+        # print("B", ema_y_hat)
 
         if args.consistency:
             consistency_weight = get_current_consistency_weight(epoch, args)
@@ -401,18 +414,23 @@ def evaluate(model, data_loader, criterion, args, save_output=False):
     with torch.no_grad():
         for i, (data) in tqdm(enumerate(data_loader), total=len(data_loader)):
             # tqdm 작업줄 표시
-            feats, scripts, feat_lengths, script_lengths = data
+            feats, scripts, feat_lengths, script_lengths, noisy, noisy_lengths = data
+
             feats = feats.cuda(args.gpu)
             scripts = scripts.cuda(args.gpu)
             feat_lengths = feat_lengths.cuda(args.gpu)
+            noisy = noisy.cuda(args.gpu, non_blocking=True)
+            noisy_lengths = noisy_lengths.cuda(args.gpu, non_blocking=True)
 
-            src_len = scripts.size(1)
             target = scripts[:, 1:]
+            src_len = scripts.size(1)
 
             # teacher forcing 안쓰므로 scripts 필요 X
-            logit = model(feats, feat_lengths, scripts, script_lengths)
+            logit = model(noisy, noisy_lengths, None, eacher_forcing_ratio=0.0)
+            logit = torch.stack(logit, dim=1).cuda(args.gpu)
             y_hat = logit.max(-1)[1]
 
+            logit = logit[:,:target.size(1),:] # target length까지만
             loss = criterion(logit.contiguous().view(-1, logit.size(-1)), target.contiguous().view(-1))
             total_loss += loss.item()
             total_num += sum(feat_lengths).item()
@@ -422,13 +440,14 @@ def evaluate(model, data_loader, criterion, args, save_output=False):
 
             total_dist += dist
             total_length += length
+
             if save_output == True:
                 transcripts_list += transcripts
             total_sent_num += target.size(0)
 
-
     aver_loss = total_loss / total_num
     aver_cer = float(total_dist / total_length) * 100
+
     return aver_loss, aver_cer, transcripts_list
 
 
